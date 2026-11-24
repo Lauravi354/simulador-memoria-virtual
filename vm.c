@@ -6,10 +6,17 @@
 #define TAM_ESPACO_VIRTUAL (256L * TAM_PAGINA)
 #define TOTAL_PAGINAS 256
 #define TOTAL_FRAMES 128
+#define TOTAL_ENTRADAS_TLB 16
+
+typedef struct {
+    int pagina;
+    int frame;
+    int ordem;
+} EntradaTLB;
 
 int main(int argc, char *argv[]){
-    if (argc != 3) {
-        printf("Uso nesta etapa: %s address.txt fifo|lru\n", argv[0]);
+    if (argc != 4) {
+        printf("Uso: %s address.txt fifo|lru fifo|lru\n", argv[0]);
         return 1;
     }
 
@@ -17,7 +24,15 @@ int main(int argc, char *argv[]){
     int usar_lru = strcmp(argv[2], "lru") == 0;
 
     if (usar_fifo == 0 && usar_lru == 0) {
-        printf("Algoritmo invalido. Use fifo ou lru.\n");
+        printf("Algoritmo da RAM invalido. Use fifo ou lru.\n");
+        return 1;
+    }
+
+    int usar_fifo_tlb = strcmp(argv[3], "fifo") == 0;
+    int usar_lru_tlb = strcmp(argv[3], "lru") == 0;
+
+    if (usar_fifo_tlb == 0 && usar_lru_tlb == 0) {
+        printf("Algoritmo da TLB invalido. Use fifo ou lru.\n");
         return 1;
     }
 
@@ -58,6 +73,12 @@ int main(int argc, char *argv[]){
 
     char linha[128];
     int numero_linha = 0;
+
+    EntradaTLB tlb[TOTAL_ENTRADAS_TLB];
+
+    for (int i = 0; i < TOTAL_ENTRADAS_TLB; i++) {
+        tlb[i].pagina = -1;
+    }
 
     while (fgets(linha, sizeof linha, arquivo) != NULL) {
         numero_linha++;
@@ -110,7 +131,20 @@ int main(int argc, char *argv[]){
         int pagina = endereco_logico / TAM_PAGINA;
         int deslocamento = endereco_logico % TAM_PAGINA;
 
-        int frame = tabela_paginas[pagina];
+        int entrada_tlb = -1;
+        int frame = -1;
+
+        for (int i = 0; i < TOTAL_ENTRADAS_TLB; i++) {
+            if (tlb[i].pagina == pagina) {
+                entrada_tlb = i;
+                frame = tlb[i].frame;
+                break;
+            }
+        }
+
+        if (entrada_tlb == -1) {
+            frame = tabela_paginas[pagina];
+        }
 
         if (frame == -1) {
             if (proximo_frame < TOTAL_FRAMES) {
@@ -132,6 +166,12 @@ int main(int argc, char *argv[]){
 
                 int pagina_removida = pagina_do_frame[frame];
                 tabela_paginas[pagina_removida] = -1;
+                for (int i = 0; i < TOTAL_ENTRADAS_TLB; i++) {
+                    if (tlb[i].pagina == pagina_removida) {
+                        tlb[i].pagina = -1;
+                        break;
+                    }
+                }
             }
 
             int inicio_pagina = pagina * TAM_PAGINA;
@@ -145,6 +185,28 @@ int main(int argc, char *argv[]){
         }
 
         ultimo_acesso[frame] = numero_linha;
+
+        if (entrada_tlb == -1) {
+            int destino = 0;
+
+            for (int i = 0; i < TOTAL_ENTRADAS_TLB; i++) {
+                if (tlb[i].pagina == -1) {
+                    destino = i;
+                    break;
+                }
+
+                if (tlb[i].ordem < tlb[destino].ordem) {
+                    destino = i;
+                }
+            }
+
+            tlb[destino].pagina = pagina;
+            tlb[destino].frame = frame;
+            tlb[destino].ordem = numero_linha;
+        }
+        else if (usar_lru_tlb == 1) {
+            tlb[entrada_tlb].ordem = numero_linha;
+        }
 
         int endereco_fisico = frame * TAM_PAGINA + deslocamento;
         int valor = memoria[frame][deslocamento];
