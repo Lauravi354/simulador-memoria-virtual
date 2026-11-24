@@ -106,6 +106,16 @@ int main(int argc, char *argv[]){
         tlb[i].pagina = -1;
     }
 
+    FILE *saida = fopen("correct.txt", "w");
+    if (saida == NULL) {
+        printf("Nao foi possivel criar correct.txt.\n");
+        fclose(arquivo);
+        return 1;
+    }
+
+    int faltas_pagina = 0;
+    int acertos_tlb = 0;
+
     while (fgets(linha, sizeof linha, arquivo) != NULL) {
         numero_linha++;
 
@@ -149,6 +159,7 @@ int main(int argc, char *argv[]){
 
         if ((encontrou_quebra == 0 && feof(arquivo) == 0) || encontrou_numero == 0 || terminou_linha == 0 || excedeu_limite == 1) {
             printf("Endereco invalido na linha %d.\n", numero_linha);
+            fclose(saida);
             fclose(arquivo);
             return 1;
         }
@@ -190,15 +201,20 @@ int main(int argc, char *argv[]){
 
         if (erro_threads == 1) {
             printf("Erro ao executar a busca na TLB com threads.\n");
+            fclose(saida);
             fclose(arquivo);
             return 1;
         }
 
         if (entrada_tlb == -1) {
             frame = tabela_paginas[pagina];
+        } else {
+            acertos_tlb++;
         }
 
         if (frame == -1) {
+            faltas_pagina++;
+
             if (proximo_frame < TOTAL_FRAMES) {
                 frame = proximo_frame;
                 proximo_frame++;
@@ -255,6 +271,7 @@ int main(int argc, char *argv[]){
             tlb[destino].pagina = pagina;
             tlb[destino].frame = frame;
             tlb[destino].ordem = numero_linha;
+            entrada_tlb = destino;
         }
         else if (usar_lru_tlb == 1) {
             tlb[entrada_tlb].ordem = numero_linha;
@@ -262,18 +279,49 @@ int main(int argc, char *argv[]){
 
         int endereco_fisico = frame * TAM_PAGINA + deslocamento;
         int valor = memoria[frame][deslocamento];
+        if (valor >= 128) {
+            valor -= 256;
+        }
 
-        printf("%ld -> pagina %d, frame %d, endereco fisico %d, valor %d\n", endereco_lido, pagina, frame, endereco_fisico, valor);
-
-        printf("%ld -> pagina %d, deslocamento %d\n", endereco_lido, pagina, deslocamento);
+        if (fprintf(saida, "Virtual address: %ld TLB: %d Physical address: %d Value: %d\n",
+                    endereco_lido, entrada_tlb, endereco_fisico, valor) < 0) {
+            printf("Erro ao gravar correct.txt.\n");
+            fclose(saida);
+            fclose(arquivo);
+            return 1;
+        }
     }
 
     if (feof(arquivo) == 0) {
         printf("Erro ao ler o arquivo.\n");
+        fclose(saida);
         fclose(arquivo);
         return 1;
     }
 
+    double taxa_faltas = 0.0;
+    double taxa_acertos = 0.0;
+
+    if (numero_linha > 0) {
+        taxa_faltas = 1.0 * faltas_pagina / numero_linha;
+        taxa_acertos = 1.0 * acertos_tlb / numero_linha;
+    }
+
+    int resultado_resumo = fprintf(saida,
+        "Number of Translated Addresses = %d\n"
+        "Page Faults = %d\n"
+        "Page Fault Rate = %.3f\n"
+        "TLB Hits = %d\n"
+        "TLB Hit Rate = %.3f\n",
+        numero_linha, faltas_pagina, taxa_faltas, acertos_tlb, taxa_acertos);
+
     fclose(arquivo);
+    int resultado_fechamento = fclose(saida);
+
+    if (resultado_resumo < 0 || resultado_fechamento != 0) {
+        printf("Erro ao gravar correct.txt.\n");
+        return 1;
+    }
+
     return 0;
 }
