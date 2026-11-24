@@ -1,6 +1,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <pthread.h>
 
 #define TAM_PAGINA 256
 #define TAM_ESPACO_VIRTUAL (256L * TAM_PAGINA)
@@ -13,6 +14,21 @@ typedef struct {
     int frame;
     int ordem;
 } EntradaTLB;
+
+typedef struct {
+    int pagina_procurada;
+    int pagina_da_entrada;
+    int encontrou;
+} DadosBuscaTLB;
+
+void *buscar_entrada_tlb(void *argumento)
+{
+    DadosBuscaTLB *dados = argumento;
+
+    dados->encontrou = dados->pagina_procurada == dados->pagina_da_entrada;
+
+    return NULL;
+}
 
 int main(int argc, char *argv[]){
     if (argc != 4) {
@@ -51,11 +67,21 @@ int main(int argc, char *argv[]){
 
     char armazenamento[TAM_ESPACO_VIRTUAL];
 
-    if (fread(armazenamento, 1, sizeof armazenamento, disco) < sizeof armazenamento) {
-        printf("Nao foi possivel ler todo o BACKING_STORE.bin.\n");
-        fclose(disco);
-        fclose(arquivo);
-        return 1;
+    for (int i = 0; i < TAM_ESPACO_VIRTUAL; i++) {
+        int byte = fgetc(disco);
+
+        if (byte == EOF) {
+            printf("Nao foi possivel ler todo o BACKING_STORE.bin.\n");
+            fclose(disco);
+            fclose(arquivo);
+            return 1;
+        }
+
+        if (CHAR_MIN < 0 && byte >= 128) {
+            byte = byte - 256;
+        }
+
+        armazenamento[i] = byte;
     }
 
     fclose(disco);
@@ -134,12 +160,38 @@ int main(int argc, char *argv[]){
         int entrada_tlb = -1;
         int frame = -1;
 
+        pthread_t threads[TOTAL_ENTRADAS_TLB];
+        DadosBuscaTLB dados_busca[TOTAL_ENTRADAS_TLB];
+        int threads_criadas = 0;
+        int erro_threads = 0;
+
         for (int i = 0; i < TOTAL_ENTRADAS_TLB; i++) {
-            if (tlb[i].pagina == pagina) {
-                entrada_tlb = i;
-                frame = tlb[i].frame;
+            dados_busca[i].pagina_procurada = pagina;
+            dados_busca[i].pagina_da_entrada = tlb[i].pagina;
+
+            if (pthread_create(&threads[i], NULL, buscar_entrada_tlb, &dados_busca[i]) == 0) {
+                threads_criadas++;
+            } else {
+                erro_threads = 1;
                 break;
             }
+        }
+
+        for (int i = 0; i < threads_criadas; i++) {
+            if (pthread_join(threads[i], NULL) == 0) {
+                if (dados_busca[i].encontrou == 1) {
+                    entrada_tlb = i;
+                    frame = tlb[i].frame;
+                }
+            } else {
+                erro_threads = 1;
+            }
+        }
+
+        if (erro_threads == 1) {
+            printf("Erro ao executar a busca na TLB com threads.\n");
+            fclose(arquivo);
+            return 1;
         }
 
         if (entrada_tlb == -1) {
