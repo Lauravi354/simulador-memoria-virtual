@@ -3,6 +3,8 @@
 
 #define TAM_PAGINA 256
 #define TAM_ESPACO_VIRTUAL (256L * TAM_PAGINA)
+#define TOTAL_PAGINAS 256
+#define TOTAL_FRAMES 256
 
 int main(int argc, char *argv[]){
     if (argc != 2) {
@@ -14,6 +16,32 @@ int main(int argc, char *argv[]){
     if (arquivo == NULL) {
         printf("Nao foi possivel abrir o arquivo %s.\n", argv[1]);
         return 1;
+    }
+
+    FILE *disco = fopen("BACKING_STORE.bin", "rb");
+    if (disco == NULL) {
+        printf("Nao foi possivel abrir BACKING_STORE.bin.\n");
+        fclose(arquivo);
+        return 1;
+    }
+
+    char armazenamento[TAM_ESPACO_VIRTUAL];
+
+    if (fread(armazenamento, 1, sizeof armazenamento, disco) < sizeof armazenamento) {
+        printf("Nao foi possivel ler todo o BACKING_STORE.bin.\n");
+        fclose(disco);
+        fclose(arquivo);
+        return 1;
+    }
+
+    fclose(disco);
+
+    int tabela_paginas[TOTAL_PAGINAS];
+    char memoria[TOTAL_FRAMES][TAM_PAGINA];
+    int proximo_frame = 0;
+
+    for (int i = 0; i < TOTAL_PAGINAS; i++) {
+        tabela_paginas[i] = -1;
     }
 
     char linha[128];
@@ -69,6 +97,25 @@ int main(int argc, char *argv[]){
         int endereco_logico = endereco_lido % TAM_ESPACO_VIRTUAL;
         int pagina = endereco_logico / TAM_PAGINA;
         int deslocamento = endereco_logico % TAM_PAGINA;
+
+        int frame = tabela_paginas[pagina];
+
+        if (frame == -1) {
+            frame = proximo_frame;
+            int inicio_pagina = pagina * TAM_PAGINA;
+
+            for (int i = 0; i < TAM_PAGINA; i++) {
+                memoria[frame][i] = armazenamento[inicio_pagina + i];
+            }
+
+            tabela_paginas[pagina] = frame;
+            proximo_frame++;
+        }
+
+        int endereco_fisico = frame * TAM_PAGINA + deslocamento;
+        int valor = memoria[frame][deslocamento];
+
+        printf("%ld -> pagina %d, frame %d, endereco fisico %d, valor %d\n", endereco_lido, pagina, frame, endereco_fisico, valor);
 
         printf("%ld -> pagina %d, deslocamento %d\n", endereco_lido, pagina, deslocamento);
     }
