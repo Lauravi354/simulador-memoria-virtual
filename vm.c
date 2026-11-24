@@ -1,14 +1,23 @@
 #include <limits.h>
 #include <stdio.h>
+#include <string.h>
 
 #define TAM_PAGINA 256
 #define TAM_ESPACO_VIRTUAL (256L * TAM_PAGINA)
 #define TOTAL_PAGINAS 256
-#define TOTAL_FRAMES 256
+#define TOTAL_FRAMES 128
 
 int main(int argc, char *argv[]){
-    if (argc != 2) {
-        printf("Uso nesta etapa: %s address.txt\n", argv[0]);
+    if (argc != 3) {
+        printf("Uso nesta etapa: %s address.txt fifo|lru\n", argv[0]);
+        return 1;
+    }
+
+    int usar_fifo = strcmp(argv[2], "fifo") == 0;
+    int usar_lru = strcmp(argv[2], "lru") == 0;
+
+    if (usar_fifo == 0 && usar_lru == 0) {
+        printf("Algoritmo invalido. Use fifo ou lru.\n");
         return 1;
     }
 
@@ -39,6 +48,9 @@ int main(int argc, char *argv[]){
     int tabela_paginas[TOTAL_PAGINAS];
     char memoria[TOTAL_FRAMES][TAM_PAGINA];
     int proximo_frame = 0;
+    int pagina_do_frame[TOTAL_FRAMES];
+    int proxima_vitima_fifo = 0;
+    int ultimo_acesso[TOTAL_FRAMES];
 
     for (int i = 0; i < TOTAL_PAGINAS; i++) {
         tabela_paginas[i] = -1;
@@ -101,7 +113,27 @@ int main(int argc, char *argv[]){
         int frame = tabela_paginas[pagina];
 
         if (frame == -1) {
-            frame = proximo_frame;
+            if (proximo_frame < TOTAL_FRAMES) {
+                frame = proximo_frame;
+                proximo_frame++;
+            } else {
+                if (usar_lru == 1) {
+                    frame = 0;
+
+                    for (int i = 1; i < TOTAL_FRAMES; i++) {
+                        if (ultimo_acesso[i] < ultimo_acesso[frame]) {
+                            frame = i;
+                        }
+                    }
+                } else {
+                    frame = proxima_vitima_fifo;
+                    proxima_vitima_fifo = (proxima_vitima_fifo + 1) % TOTAL_FRAMES;
+                }
+
+                int pagina_removida = pagina_do_frame[frame];
+                tabela_paginas[pagina_removida] = -1;
+            }
+
             int inicio_pagina = pagina * TAM_PAGINA;
 
             for (int i = 0; i < TAM_PAGINA; i++) {
@@ -109,8 +141,10 @@ int main(int argc, char *argv[]){
             }
 
             tabela_paginas[pagina] = frame;
-            proximo_frame++;
+            pagina_do_frame[frame] = pagina;
         }
+
+        ultimo_acesso[frame] = numero_linha;
 
         int endereco_fisico = frame * TAM_PAGINA + deslocamento;
         int valor = memoria[frame][deslocamento];
